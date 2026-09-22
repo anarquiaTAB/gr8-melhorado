@@ -32,6 +32,9 @@ jobs:
       - name: Instala dependências
         run: flutter pub get
 
+      - name: Gera ícone do app
+        run: dart run flutter_launcher_icons
+
       - name: Roda análise estática
         run: flutter analyze --no-fatal-infos
         continue-on-error: true
