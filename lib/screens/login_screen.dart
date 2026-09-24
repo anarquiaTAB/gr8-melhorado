@@ -14,8 +14,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _auth = AuthService();
   final _raCtrl = TextEditingController();
   final _senhaCtrl = TextEditingController();
-  final _escIdCtrl = TextEditingController();
-  final _escCodCtrl = TextEditingController();
+  final _unidadeCtrl = TextEditingController();
 
   bool _loading = false;
   bool _checandoSessao = true;
@@ -40,8 +39,10 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _fazerLogin() async {
-    if (_raCtrl.text.trim().isEmpty || _senhaCtrl.text.isEmpty) {
-      setState(() => _erro = 'Preenche RA e senha, boss.');
+    if (_raCtrl.text.trim().isEmpty ||
+        _senhaCtrl.text.isEmpty ||
+        _unidadeCtrl.text.trim().isEmpty) {
+      setState(() => _erro = 'Preenche unidade, RA e senha.');
       return;
     }
 
@@ -53,8 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final result = await _auth.login(
       ra: _raCtrl.text.trim(),
       senha: _senhaCtrl.text,
-      escId: _escIdCtrl.text.trim(),
-      escCod: _escCodCtrl.text.trim(),
+      unidade: _unidadeCtrl.text.trim(),
     );
 
     if (!mounted) return;
@@ -139,22 +139,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _escIdCtrl,
-                          decoration: const InputDecoration(hintText: 'ID Escola'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: _escCodCtrl,
-                          decoration: const InputDecoration(hintText: 'Cód. Escola'),
-                        ),
-                      ),
-                    ],
+                  TextField(
+                    controller: _unidadeCtrl,
+                    decoration: const InputDecoration(
+                      hintText: 'Unidade (código da escola)',
+                      prefixIcon: Icon(Icons.apartment_outlined),
+                    ),
                   ),
                   if (_erro != null) ...[
                     const SizedBox(height: 12),

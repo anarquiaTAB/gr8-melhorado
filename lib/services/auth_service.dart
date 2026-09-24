@@ -18,14 +18,18 @@ class AuthService {
   static const _kToken = 'gr8_token';
   static const _kEscId = 'gr8_escid';
   static const _kEscCod = 'gr8_esccod';
+  static const _kEscNome = 'gr8_escnome';
   static const _kLogin = 'gr8_login'; // RA salvo para exibir, não a senha
 
-  /// Faz login com RA/senha do próprio usuário e persiste apenas o token.
+  /// Faz login com RA/senha/unidade do próprio usuário.
+  ///
+  /// O app original só pede UM campo "unidade" (código da escola). O
+  /// servidor resolve esse código e devolve escid/esccod/escnome na
+  /// resposta — só o token e esses dados de retorno são persistidos.
   Future<AuthResult> login({
     required String ra,
     required String senha,
-    required String escId,
-    required String escCod,
+    required String unidade,
   }) async {
     try {
       final resp = await http.post(
@@ -34,15 +38,15 @@ class AuthService {
         body: jsonEncode({
           'login': ra,
           'senha': senha,
-          'escid': escId,
-          'esccod': escCod,
+          'unidade': unidade,
         }),
       );
 
       if (resp.statusCode != 200) {
         return AuthResult(
           success: false,
-          message: 'Falha no login (HTTP ${resp.statusCode}). Confira RA e senha.',
+          message:
+              'Falha no login (HTTP ${resp.statusCode}). Confira unidade, RA e senha.',
         );
       }
 
@@ -50,14 +54,19 @@ class AuthService {
       final token = data['api_token'] ?? data['token'];
 
       if (token == null) {
-        return AuthResult(success: false, message: 'Resposta inesperada do servidor.');
+        return AuthResult(
+          success: false,
+          message: 'O servidor não retornou os dados do aluno. '
+              'Verifique o código da unidade e o login.',
+        );
       }
 
-      // Persiste só o essencial pro autologin — senha descartada da memória
-      // assim que a função retorna.
+      // Persiste o token e os dados que o servidor devolveu — senha
+      // descartada da memória assim que a função retorna.
       await _storage.write(key: _kToken, value: token.toString());
-      await _storage.write(key: _kEscId, value: escId);
-      await _storage.write(key: _kEscCod, value: escCod);
+      await _storage.write(key: _kEscId, value: data['escid']?.toString() ?? '');
+      await _storage.write(key: _kEscCod, value: data['esccod']?.toString() ?? unidade);
+      await _storage.write(key: _kEscNome, value: data['escnome']?.toString() ?? '');
       await _storage.write(key: _kLogin, value: ra);
 
       return AuthResult(success: true, token: token.toString());
@@ -69,6 +78,7 @@ class AuthService {
   Future<String?> getStoredToken() => _storage.read(key: _kToken);
   Future<String?> getStoredEscId() => _storage.read(key: _kEscId);
   Future<String?> getStoredEscCod() => _storage.read(key: _kEscCod);
+  Future<String?> getStoredEscNome() => _storage.read(key: _kEscNome);
   Future<String?> getStoredLogin() => _storage.read(key: _kLogin);
 
   Future<bool> hasSession() async {
