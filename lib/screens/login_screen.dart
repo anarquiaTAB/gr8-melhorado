@@ -54,7 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final result = await _auth.login(
       ra: _raCtrl.text.trim(),
       senha: _senhaCtrl.text,
-      unidade: _unidadeCtrl.text.trim(),
+      inst: _unidadeCtrl.text.trim(),
     );
 
     if (!mounted) return;
@@ -141,9 +141,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _unidadeCtrl,
+                    maxLength: 4,
                     decoration: const InputDecoration(
-                      hintText: 'Unidade (código da escola)',
+                      hintText: 'Código da instituição',
                       prefixIcon: Icon(Icons.apartment_outlined),
+                      counterText: '',
                     ),
                   ),
                   if (_erro != null) ...[

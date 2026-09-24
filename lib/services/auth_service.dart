@@ -1,100 +1,125 @@
-import 'dart:convert';
+import 'package:dio/dio.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:cookie_jar/cookie_jar.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:http/http.dart' as http;
 
-/// Serviço de autenticação.
+/// Autenticação real do portal GR8 (ASP clássico).
 ///
-/// A senha do usuário NUNCA é salva em disco. Apenas o token de sessão
-/// retornado pelo servidor é persistido, dentro do Android Keystore
-/// (via flutter_secure_storage), que é criptografado a nível de SO e
-/// não é legível por outros apps nem por um dump simples de arquivos.
+/// O login não devolve token — a sessão é mantida 100% por cookie
+/// (ASPSESSIONID...). Por isso usamos um cookie jar persistente em
+/// vez de um Bearer token. A senha nunca é salva em disco; só o
+/// cookie de sessão persiste, dentro do storage privado do app.
 class AuthService {
-  static const _storage = FlutterSecureStorage(
+  static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
+  static const _kLogin = 'gr8_login';
+  static const _kInst = 'gr8_inst';
 
-  static const String baseUrl = 'https://gr8escolar.com.br/api/aluno';
+  static const String baseUrl = 'https://alunos.gr8.com.br';
+  static const String _origemFixo = 'x&4m3@.f!';
 
-  static const _kToken = 'gr8_token';
-  static const _kEscId = 'gr8_escid';
-  static const _kEscCod = 'gr8_esccod';
-  static const _kEscNome = 'gr8_escnome';
-  static const _kLogin = 'gr8_login'; // RA salvo para exibir, não a senha
+  late Dio dio;
+  PersistCookieJar? _cookieJar;
 
-  /// Faz login com RA/senha/unidade do próprio usuário.
-  ///
-  /// O app original só pede UM campo "unidade" (código da escola). O
-  /// servidor resolve esse código e devolve escid/esccod/escnome na
-  /// resposta — só o token e esses dados de retorno são persistidos.
+  Future<void> ensureClient() async {
+    if (_cookieJar != null) return;
+    final dir = await getApplicationDocumentsDirectory();
+    _cookieJar = PersistCookieJar(
+      storage: FileStorage('${dir.path}/.cookies/'),
+    );
+    dio = Dio(BaseOptions(
+      baseUrl: baseUrl,
+      followRedirects: false,
+      validateStatus: (status) => status != null && status < 500,
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        'User-Agent':
+            'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36',
+      },
+    ));
+    dio.interceptors.add(CookieManager(_cookieJar!));
+  }
+
   Future<AuthResult> login({
     required String ra,
     required String senha,
-    required String unidade,
+    required String inst,
   }) async {
+    await ensureClient();
     try {
-      final resp = await http.post(
-        Uri.parse('$baseUrl/aluno_login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      // GET inicial pra receber o cookie ASPSESSIONID antes do POST.
+      await dio.get('/alu_login.asp');
+
+      final resp = await dio.post(
+        '/alu_login_exe.asp',
+        data: {
+          'inst': inst,
           'login': ra,
           'senha': senha,
-          'unidade': unidade,
-        }),
+          'g-recaptcha-response': '',
+          'origem': _origemFixo,
+        },
+        options: Options(
+          contentType: Headers.formUrlEncodedContentType,
+          headers: {
+            'ajax-request': 'POST',
+            'Origin': baseUrl,
+            'Referer': '$baseUrl/alu_login.asp',
+          },
+        ),
       );
 
-      if (resp.statusCode != 200) {
+      final data = resp.data;
+      final status = data is Map ? data['status'] : null;
+
+      if (status != 'success') {
+        final msg = (data is Map ? data['msg']?.toString() : null);
         return AuthResult(
           success: false,
-          message:
-              'Falha no login (HTTP ${resp.statusCode}). Confira unidade, RA e senha.',
+          message: (msg != null && msg.isNotEmpty)
+              ? msg
+              : 'Login inválido. Confira instituição, RA e senha.',
         );
       }
 
-      final data = jsonDecode(resp.body);
-      final token = data['api_token'] ?? data['token'];
+      await _secureStorage.write(key: _kLogin, value: ra);
+      await _secureStorage.write(key: _kInst, value: inst);
 
-      if (token == null) {
-        return AuthResult(
-          success: false,
-          message: 'O servidor não retornou os dados do aluno. '
-              'Verifique o código da unidade e o login.',
-        );
-      }
-
-      // Persiste o token e os dados que o servidor devolveu — senha
-      // descartada da memória assim que a função retorna.
-      await _storage.write(key: _kToken, value: token.toString());
-      await _storage.write(key: _kEscId, value: data['escid']?.toString() ?? '');
-      await _storage.write(key: _kEscCod, value: data['esccod']?.toString() ?? unidade);
-      await _storage.write(key: _kEscNome, value: data['escnome']?.toString() ?? '');
-      await _storage.write(key: _kLogin, value: ra);
-
-      return AuthResult(success: true, token: token.toString());
+      return AuthResult(success: true);
     } catch (e) {
       return AuthResult(success: false, message: 'Erro de conexão: $e');
     }
   }
 
-  Future<String?> getStoredToken() => _storage.read(key: _kToken);
-  Future<String?> getStoredEscId() => _storage.read(key: _kEscId);
-  Future<String?> getStoredEscCod() => _storage.read(key: _kEscCod);
-  Future<String?> getStoredEscNome() => _storage.read(key: _kEscNome);
-  Future<String?> getStoredLogin() => _storage.read(key: _kLogin);
-
+  /// Verifica se a sessão salva (cookie) ainda é válida, checando se
+  /// uma página autenticada responde 200 em vez de redirecionar pro
+  /// login (comportamento confirmado do servidor).
   Future<bool> hasSession() async {
-    final token = await getStoredToken();
-    return token != null && token.isNotEmpty;
+    await ensureClient();
+    final login = await _secureStorage.read(key: _kLogin);
+    if (login == null) return false;
+    try {
+      final resp = await dio.get('/alu_default.asp');
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
   }
 
+  Future<String?> getStoredLogin() => _secureStorage.read(key: _kLogin);
+  Future<String?> getStoredInst() => _secureStorage.read(key: _kInst);
+
   Future<void> logout() async {
-    await _storage.deleteAll();
+    await ensureClient();
+    await _cookieJar?.deleteAll();
+    await _secureStorage.deleteAll();
   }
 }
 
 class AuthResult {
   final bool success;
-  final String? token;
   final String? message;
-
-  AuthResult({required this.success, this.token, this.message});
+  AuthResult({required this.success, this.message});
 }

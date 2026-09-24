@@ -2,13 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 import '../services/gr8_api_client.dart';
 import '../services/auth_service.dart';
-import '../models/aluno.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
-import 'notas_screen.dart';
-import 'faltas_screen.dart';
-import 'avisos_screen.dart';
-import 'agenda_screen.dart';
+import 'lista_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,19 +14,19 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _api = GR8ApiClient();
   final _auth = AuthService();
+  late final GR8ApiClient _api;
 
-  Aluno? _aluno;
-  List<Nota> _notas = [];
-  List<Falta> _faltas = [];
-  List<Aviso> _avisos = [];
+  List<Map<String, String>> _avisos = [];
   bool _loading = true;
   String? _erro;
+  String _login = '';
+  String _inst = '';
 
   @override
   void initState() {
     super.initState();
+    _api = GR8ApiClient(_auth);
     _carregarDados();
   }
 
@@ -40,17 +36,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _erro = null;
     });
     try {
-      final results = await Future.wait([
-        _api.meusDados(),
-        _api.notas(),
-        _api.faltas(),
-        _api.avisos(),
-      ]);
+      final login = await _auth.getStoredLogin() ?? '';
+      final inst = await _auth.getStoredInst() ?? '';
+      final avisos = await _api.avisos();
       setState(() {
-        _aluno = results[0] as Aluno;
-        _notas = results[1] as List<Nota>;
-        _faltas = results[2] as List<Falta>;
-        _avisos = results[3] as List<Aviso>;
+        _login = login;
+        _inst = inst;
+        _avisos = avisos;
         _loading = false;
       });
     } on SessionExpiredException {
@@ -112,10 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
         Text(_erro!, textAlign: TextAlign.center),
         const SizedBox(height: 16),
         Center(
-          child: TextButton(
-            onPressed: _carregarDados,
-            child: const Text('Tentar de novo'),
-          ),
+          child: TextButton(onPressed: _carregarDados, child: const Text('Tentar de novo')),
         ),
       ],
     );
@@ -130,14 +119,6 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Container(height: 110, decoration: _skelBox()),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(child: Container(height: 90, decoration: _skelBox())),
-              const SizedBox(width: 12),
-              Expanded(child: Container(height: 90, decoration: _skelBox())),
-            ],
-          ),
-          const SizedBox(height: 16),
           Container(height: 160, decoration: _skelBox()),
         ],
       ),
@@ -148,57 +129,71 @@ class _HomeScreenState extends State<HomeScreen> {
       BoxDecoration(borderRadius: BorderRadius.circular(18), color: Colors.white);
 
   Widget _buildDashboard() {
-    final mediaGeral = _notas.isEmpty
-        ? 0.0
-        : _notas.map((n) => n.valor).reduce((a, b) => a + b) / _notas.length;
-    final faltasNaoJustificadas = _faltas.where((f) => !f.justificada).length;
-    final avisosNaoLidos = _avisos.where((a) => !a.lido).length;
+    final naoLidos = _avisos.where((a) => (a['status'] ?? '').toLowerCase().contains('não')).length;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         _perfilCard(),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: _statCard(
-                icon: Icons.grade_rounded,
-                label: 'Média geral',
-                value: mediaGeral.toStringAsFixed(1),
-                color: AppColors.primary,
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => NotasScreen(notas: _notas))),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _statCard(
-                icon: Icons.event_busy_rounded,
-                label: 'Faltas s/ justif.',
-                value: '$faltasNaoJustificadas',
-                color: faltasNaoJustificadas > 0 ? AppColors.warning : AppColors.primary,
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => FaltasScreen(faltas: _faltas))),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
         _menuTile(
           icon: Icons.campaign_rounded,
           title: 'Avisos',
-          subtitle: avisosNaoLidos > 0 ? '$avisosNaoLidos não lidos' : 'Tudo lido',
-          onTap: () => Navigator.push(
-              context, MaterialPageRoute(builder: (_) => AvisosScreen(avisos: _avisos))),
+          subtitle: naoLidos > 0 ? '$naoLidos não lidos' : 'Tudo lido',
+          onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => ListaScreen(titulo: 'Avisos', itens: _avisos))),
         ),
         const SizedBox(height: 10),
         _menuTile(
-          icon: Icons.checklist_rounded,
-          title: 'Minha Agenda',
-          subtitle: 'Tarefas e lembretes pessoais',
-          onTap: () => Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const AgendaScreen())),
+          icon: Icons.grade_rounded,
+          title: 'Boletim',
+          subtitle: 'Notas por disciplina',
+          onTap: () async {
+            final dados = await _api.boletim();
+            if (mounted) {
+              Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ListaScreen(titulo: 'Boletim', itens: dados)));
+            }
+          },
+        ),
+        const SizedBox(height: 10),
+        _menuTile(
+          icon: Icons.event_busy_rounded,
+          title: 'Faltas',
+          subtitle: 'Histórico de faltas',
+          onTap: () async {
+            final dados = await _api.faltas();
+            if (mounted) {
+              Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ListaScreen(titulo: 'Faltas', itens: dados)));
+            }
+          },
+        ),
+        const SizedBox(height: 10),
+        _menuTile(
+          icon: Icons.schedule_rounded,
+          title: 'Horários',
+          subtitle: 'Grade de aulas',
+          onTap: () async {
+            final dados = await _api.horarios();
+            if (mounted) {
+              Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ListaScreen(titulo: 'Horários', itens: dados)));
+            }
+          },
+        ),
+        const SizedBox(height: 10),
+        _menuTile(
+          icon: Icons.restaurant_rounded,
+          title: 'Cardápio',
+          subtitle: 'Cardápio da semana',
+          onTap: () async {
+            final dados = await _api.cardapio();
+            if (mounted) {
+              Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ListaScreen(titulo: 'Cardápio', itens: dados)));
+            }
+          },
         ),
       ],
     );
@@ -221,63 +216,21 @@ class _HomeScreenState extends State<HomeScreen> {
           CircleAvatar(
             radius: 30,
             backgroundColor: AppColors.primary.withOpacity(0.2),
-            backgroundImage:
-                _aluno?.fotoUrl != null ? NetworkImage(_aluno!.fotoUrl!) : null,
-            child: _aluno?.fotoUrl == null
-                ? const Icon(Icons.person, color: AppColors.primary, size: 30)
-                : null,
+            child: const Icon(Icons.person, color: AppColors.primary, size: 30),
           ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _aluno?.nome ?? '—',
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text('RA $_login', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                 const SizedBox(height: 4),
-                Text(_aluno?.turma ?? '',
+                Text('Instituição $_inst',
                     style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
               ],
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _statCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.divider),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(height: 10),
-            Text(value,
-                style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w800, color: color)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-          ],
-        ),
       ),
     );
   }
@@ -307,8 +260,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  Text(subtitle,
-                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  Text(subtitle, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                 ],
               ),
             ),
