@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:html/parser.dart' as html_parser;
+import 'package:html/dom.dart' as html_dom;
 import 'auth_service.dart';
 
 /// Cliente das páginas autenticadas do portal GR8. Como o backend é
@@ -15,7 +16,7 @@ class GR8ApiClient {
     return _auth.dio;
   }
 
-  Future<html_parser.Document> _getPage(String path) async {
+  Future<html_dom.Document> _getPage(String path) async {
     final dio = await _client();
     final resp = await dio.get(path);
     if (resp.statusCode == 302 || resp.statusCode == 401) {
@@ -65,7 +66,7 @@ class GR8ApiClient {
     return _extrairTabela(doc);
   }
 
-  List<Map<String, String>> _extrairTabela(html_parser.Document doc) {
+  List<Map<String, String>> _extrairTabela(html_dom.Document doc) {
     final linhas = doc.querySelectorAll('table tr');
     if (linhas.isEmpty) return [];
 
